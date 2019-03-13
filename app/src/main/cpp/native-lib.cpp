@@ -50,19 +50,21 @@ Java_lqk_video_MainActivity_stringFromJNI(
     } else{
         OSS_FORMAT("avformat_open_input failed : ", av_err2str(re))
         hello = OSS_STR;
-        goto end;
+        return env->NewStringUTF(hello.c_str());
     }
 
     // 手动探测 媒体信息 比如flv h264等不包含头的数据
     if (avformat_find_stream_info(ps, 0) < 0){
         OSS_FORMAT("avformat_find_stream_info failed : ", av_err2str(re))
         hello = OSS_STR;
-        goto end;
+        return env->NewStringUTF(hello.c_str());
     }
 
     OSS_CLEAR // 清空 (oss.clear() 是清除错误位 不能清空)
     OSS_FORMAT(" ", " ")
 
+    int video_stream = -1;
+    int audio_stream = -1;
     // AVStream
     // AVRational time_base; 代表duration的单位 含义是(num/den)秒
     // int64_t duration;  以time_base为单位的一个数
@@ -75,10 +77,16 @@ Java_lqk_video_MainActivity_stringFromJNI(
         OSS_FORMAT_ENUM("AVMediaType: ", stream->codecpar->codec_type)
         OSS_FORMAT_ENUM("AVCodecID: ", stream->codecpar->codec_id)
         if (stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO){
+            video_stream = i;
+            AVPixelFormat fmt;
+            OSS_FORMAT("AVPixelFormat: ", stream->codecpar->format)
             OSS_FORMAT("width: ", stream->codecpar->width)
             OSS_FORMAT("height: ", stream->codecpar->height)
-            OSS_FORMAT_AVRATIONAL("avg_frame_rate: ", stream->avg_frame_rate)
+            OSS_FORMAT("fps: ", r2d(stream->avg_frame_rate))
         } else{
+            audio_stream = i;
+            AVSampleFormat fmt;
+            OSS_FORMAT("AVSampleFormat: ", stream->codecpar->format)
             OSS_FORMAT("channels: ", stream->codecpar->channels)
             OSS_FORMAT("sample_rate: ", stream->codecpar->sample_rate)
         }
@@ -92,6 +100,29 @@ Java_lqk_video_MainActivity_stringFromJNI(
 
     hello += OSS_STR;
 
+    //AVPacket容易造成内存泄漏
+    // AVBufferRef:引用计数
+    // pts: 显示时间(单位AVRational)
+    // dts: 解码时间
+    //    av_packet_alloc();    库内部初始化
+    //    av_packet_clone();    拷贝
+    //    av_packet_ref();av_packet_unref(); 手动计数
+    //    av_packet_free();     库内部销毁
+    //    av_packet_from_data() 手动创建packet
+
+    //    av_seek_frame(AVFormatContext *s, int stream_index, int64_t timestamp,int flags)
+    AVPacket* pkt = av_packet_alloc();
+    for (;;) {
+        int re = av_read_frame(ps, pkt);
+        if (re != 0){
+            int pos = 5 * r2d(ps->streams[video_stream]->time_base);
+            av_seek_frame(ps, video_stream, pos, AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_FRAME);
+            continue;
+        }
+
+    }
+
+
     avformat_close_input(&ps);
     if (ps == NULL){
         hello += "close success";
@@ -99,6 +130,5 @@ Java_lqk_video_MainActivity_stringFromJNI(
         hello += "close filed";
     }
 
-end:
     return env->NewStringUTF(hello.c_str());
 }
