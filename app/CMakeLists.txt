@@ -30,7 +30,7 @@ find_library( log-lib log )
 
 target_link_libraries( # Specifies the target library.
                        native-lib
-                       GLESv2 EGL   #video
+                       # GLESv2 EGL   #video
                        # OpenSLES     #audio
                        android      #android native
                        avcodec avformat avutil swscale swresample   #ffmpeg

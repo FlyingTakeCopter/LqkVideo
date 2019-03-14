@@ -8,6 +8,17 @@ extern "C"{
 #include <libavutil/error.h>
 }
 
+#ifdef ANDROID
+#include "android/log.h"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "XPlay", __VA_ARGS__)
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, "XPlay", __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "XPlay", __VA_ARGS__)
+#else
+#define LOGI(...) pringf("XPlay", __VA_ARGS__)
+#define LOGD(...) printf("XPlay", __VA_ARGS__)
+#define LOGE(...) printf("XPlay", __VA_ARGS__)
+#endif
+
 // 全局变量 用作输出
 std::ostringstream oss;
 // 清空
@@ -42,7 +53,10 @@ Java_lqk_video_MainActivity_stringFromJNI(
     avformat_network_init();
     // 打开文件
     AVFormatContext *ps = NULL;
-    char p[] = "http://ksy.fffffive.com/mda-hinp1ik37b0rt1mj/mda-hinp1ik37b0rt1mj.mp4";
+//    av_find_input_format()
+//    AVInputFormat
+//    char p[] = "http://ksy.fffffive.com/mda-hinp1ik37b0rt1mj/mda-hinp1ik37b0rt1mj.mp4";
+    char p[] = "sdcard/v1080.mp4";
     int re = avformat_open_input(&ps, p, 0, 0);
     if (re == 0){
         OSS_FORMAT("avformat_open_input success : ", p)
@@ -112,16 +126,19 @@ Java_lqk_video_MainActivity_stringFromJNI(
 
     //    av_seek_frame(AVFormatContext *s, int stream_index, int64_t timestamp,int flags)
     AVPacket* pkt = av_packet_alloc();
-    for (;;) {
+    while (1){
         int re = av_read_frame(ps, pkt);
         if (re != 0){
             int pos = 5 * r2d(ps->streams[video_stream]->time_base);
-            av_seek_frame(ps, video_stream, pos, AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_FRAME);
+            av_seek_frame(ps, video_stream, 0, AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_FRAME);
             continue;
         }
 
+        LOGI("av_read_frame: pts: %lld  dts: %lld streamindex: %d duration: %lld", pkt->pts, pkt->dts, pkt->stream_index, pkt->duration);
+        av_packet_unref(pkt);
     }
 
+    av_packet_free(&pkt);
 
     avformat_close_input(&ps);
     if (ps == NULL){
