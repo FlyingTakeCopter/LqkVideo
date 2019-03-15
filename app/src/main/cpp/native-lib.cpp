@@ -47,11 +47,12 @@ Java_lqk_video_MainActivity_stringFromJNI(
     std::string hello = "Hello from \n C++";
 //    hello += avcodec_configuration();
 
-    // 注册解封装
+    // 解封装流程
+    // 1.注册解封装
     av_register_all();
-    // 注册网络
+    // 2.注册网络
     avformat_network_init();
-    // 打开文件
+    // 3.打开文件
     AVFormatContext *ps = NULL;
 //    av_find_input_format()
 //    AVInputFormat
@@ -67,7 +68,7 @@ Java_lqk_video_MainActivity_stringFromJNI(
         return env->NewStringUTF(hello.c_str());
     }
 
-    // 手动探测 媒体信息 比如flv h264等不包含头的数据
+    // 4.探测stream流信息 手动探测 媒体信息 比如flv h264等不包含头的数据
     if (avformat_find_stream_info(ps, 0) < 0){
         OSS_FORMAT("avformat_find_stream_info failed : ", av_err2str(re))
         hello = OSS_STR;
@@ -77,6 +78,7 @@ Java_lqk_video_MainActivity_stringFromJNI(
     OSS_CLEAR // 清空 (oss.clear() 是清除错误位 不能清空)
     OSS_FORMAT(" ", " ")
 
+    // 5.获取流的标号
     int video_stream = -1;
     int audio_stream = -1;
     // AVStream
@@ -114,6 +116,32 @@ Java_lqk_video_MainActivity_stringFromJNI(
 
     hello += OSS_STR;
 
+    // 6.解码器初始化
+    avcodec_register_all();
+    // 视频
+    // 查找解码器 软解码
+    AVCodec*videoCodec = avcodec_find_decoder(ps->streams[video_stream]->codecpar->codec_id);
+    // 硬解码
+//    codec = avcodec_find_decoder_by_name("h264_mediacodec");
+    if (videoCodec == NULL){
+        goto end;
+    }
+    // 创建解码器上下文
+    AVCodecContext* videoCodecContext = avcodec_alloc_context3(videoCodec);
+    // 复制参数
+    avcodec_parameters_to_context(videoCodecContext, ps->streams[video_stream]->codecpar);
+    // 修改线程数量
+    videoCodecContext->thread_count = 1;
+
+    // 音频
+    AVCodec*audioCodec = avcodec_find_decoder(ps->streams[audio_stream]->codecpar->codec_id);
+    if (audioCodec == NULL){
+        goto end;
+    }
+    AVCodecContext* audioCodecContext = avcodec_alloc_context3(audioCodec);
+    avcodec_parameters_to_context(audioCodecContext, ps->streams[audio_stream]->codecpar);
+
+
     //AVPacket容易造成内存泄漏
     // AVBufferRef:引用计数
     // pts: 显示时间(单位AVRational)
@@ -123,23 +151,66 @@ Java_lqk_video_MainActivity_stringFromJNI(
     //    av_packet_ref();av_packet_unref(); 手动计数
     //    av_packet_free();     库内部销毁
     //    av_packet_from_data() 手动创建packet
-
     //    av_seek_frame(AVFormatContext *s, int stream_index, int64_t timestamp,int flags)
+    // 6.按帧读取
     AVPacket* pkt = av_packet_alloc();
     while (1){
         int re = av_read_frame(ps, pkt);
         if (re != 0){
-            int pos = 5 * r2d(ps->streams[video_stream]->time_base);
-            av_seek_frame(ps, video_stream, 0, AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_FRAME);
-            continue;
+            // av_seek_frame
+//            int pos = 5 * r2d(ps->streams[video_stream]->time_base);
+//            av_seek_frame(ps, video_stream, 0, AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_FRAME);
+            break;
         }
 
+        // AVCodecContext解码器
+//        avcodec_register_all();
+//        avcodec_find_decoder();
+//        avcodec_find_decoder_by_name();
+//        // 手动指定解码器 arm硬解
+//        avcodec_find_decoder_by_name("h264_mediacodec");
+
+        // 解码环境 AVCodecContext内存注册方式
+        // AVCodecContext *avcodec_alloc_context3(const AVCodec *codec); 申请
+        // void avcodec_free_context(AVCodecContext **avctx);释放
+        // int avcodec_open2(AVCodecContext *avctx, const AVCodec *codec, AVDictionary **options); 打开解码器
+        // AVDictionary **options /libavcodec/options_table.h 设置多线程解码int thread_count
+        // opencv源码 解码会获取CPU数量 在根据数量开线程解码
+        // time_base 可设置和AVStream 的时间基数一致 编码 同步 单位统一：毫秒
+        // avcodec_parameters_to_context() AVStream 复制到 codec中  可修改time_base 或者 多线程
+
+        // 解码流程
+        // 打开解码器
+        re = avcodec_open2(videoCodecContext, videoCodec, 0);
+        if (re != 0){
+            LOGE("avcodec_open2 failed ");
+            goto end;
+        }
+
+//        AVFrame;
+//        av_frame_alloc();
+//        av_frame_free();
+//        av_frame_ref();引用计数+1     av_frame_unref -1
+//        av_frame_clone();复制 计数+1
+//        linesize // 视频 一行大小    音频 一个通道大小  用来对齐 拷贝使用
+//        nb_samples单通道样本数量
+//        pts     搜到这一帧对应的pts   时间基数可能和pkt不一样
+//        pkt_dts
+//        format AVPixelFormat  AVSampleFormat
+
+        avcodec_send_packet();
+        avcodec_receive_packet();
+
+        // 清理pkt
         LOGI("av_read_frame: pts: %lld  dts: %lld streamindex: %d duration: %lld", pkt->pts, pkt->dts, pkt->stream_index, pkt->duration);
         av_packet_unref(pkt);
     }
 
+    // 释放packet防止内存泄露
     av_packet_free(&pkt);
 
+end:
+    // 关闭AVFormatContext
     avformat_close_input(&ps);
     if (ps == NULL){
         hello += "close success";
