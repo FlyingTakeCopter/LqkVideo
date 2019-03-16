@@ -132,6 +132,12 @@ Java_lqk_video_MainActivity_stringFromJNI(
     avcodec_parameters_to_context(videoCodecContext, ps->streams[video_stream]->codecpar);
     // 修改线程数量
     videoCodecContext->thread_count = 1;
+    // 打开解码器
+    re = avcodec_open2(videoCodecContext, videoCodec, 0);
+    if (re != 0){
+        LOGE("avcodec_open2 video codec failed ");
+        goto end;
+    }
 
     // 音频
     AVCodec*audioCodec = avcodec_find_decoder(ps->streams[audio_stream]->codecpar->codec_id);
@@ -140,7 +146,12 @@ Java_lqk_video_MainActivity_stringFromJNI(
     }
     AVCodecContext* audioCodecContext = avcodec_alloc_context3(audioCodec);
     avcodec_parameters_to_context(audioCodecContext, ps->streams[audio_stream]->codecpar);
-
+    // 打开解码器
+    re = avcodec_open2(audioCodecContext, audioCodec, 0);
+    if (re != 0){
+        LOGE("avcodec_open2 audio codec failed ");
+        goto end;
+    }
 
     //AVPacket容易造成内存泄漏
     // AVBufferRef:引用计数
@@ -180,12 +191,8 @@ Java_lqk_video_MainActivity_stringFromJNI(
         // avcodec_parameters_to_context() AVStream 复制到 codec中  可修改time_base 或者 多线程
 
         // 解码流程
-        // 打开解码器
-        re = avcodec_open2(videoCodecContext, videoCodec, 0);
-        if (re != 0){
-            LOGE("avcodec_open2 failed ");
-            goto end;
-        }
+        pkt->stream_index
+
 
 //        AVFrame;
 //        av_frame_alloc();
@@ -198,8 +205,27 @@ Java_lqk_video_MainActivity_stringFromJNI(
 //        pkt_dts
 //        format AVPixelFormat  AVSampleFormat
 
-        avcodec_send_packet();
-        avcodec_receive_packet();
+//        解码/编码流程：
+//        1.发送
+//        对于解码 请调用avcodec_send_packet()以在AVPacket中给出解码器原始的压缩数据
+//        对于编码 请调用avcodec_send_frame()为编码器提供包含未压缩音频或视频的AVFrame
+//        2.循环接受
+//        在循环中接受输出，定期调用avcodec_receive_xxxxxx()函数并处理输出
+//        对于解码 请调用avcodec_receive_frame()。成功后，它将返回一个包含未压缩音频或者视频数据的AVFrame
+//        对于编码 请调用avcodec_receive_packet()。成功后，将返回带有压缩帧的AVPacket
+//        重复此呼叫，知道返回AVERROR(EAGAIN)或错误。AVERROR(EAGAIN)意味着需要重新输入数据才能返回新的输出
+
+//        在解码或编码开始时，编码器可能会接受多个输入帧/数据包而不返回帧，知道其内部缓冲区被填满为止
+//        3.结束流
+//        需要"刷新(排水)"编解码器，因为编解码器内部可能会缓冲多个帧数据包以实现性能或不必要性(考虑B帧)
+//        处理方式：
+//        发送NULL到avcodec_send_packet或avcodec_send_frame,知道返回AVERROR_EOF
+//        除非忘记进入排水模式，否则这些功能将不会返回AVERROR
+
+//        在再次解码之前，必须使用avcodec_flush_buffer()重新编码
+
+
+
 
         // 清理pkt
         LOGI("av_read_frame: pts: %lld  dts: %lld streamindex: %d duration: %lld", pkt->pts, pkt->dts, pkt->stream_index, pkt->duration);
