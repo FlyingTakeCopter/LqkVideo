@@ -6,6 +6,8 @@ extern "C"{
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/error.h>
+#include <libswscale/swscale.h>
+#include <libswresample/swresample.h>
 }
 
 #ifdef ANDROID
@@ -60,20 +62,19 @@ Java_lqk_video_MainActivity_stringFromJNI(
     char p[] = "sdcard/v1080.mp4";
     int re = avformat_open_input(&ps, p, 0, 0);
     if (re == 0){
-        OSS_FORMAT("avformat_open_input success : ", p)
         hello = OSS_STR;
     } else{
-        OSS_FORMAT("avformat_open_input failed : ", av_err2str(re))
         hello = OSS_STR;
         return env->NewStringUTF(hello.c_str());
     }
+    LOGE("success: avformat_open_input ");
 
     // 4.探测stream流信息 手动探测 媒体信息 比如flv h264等不包含头的数据
     if (avformat_find_stream_info(ps, 0) < 0){
-        OSS_FORMAT("avformat_find_stream_info failed : ", av_err2str(re))
         hello = OSS_STR;
         return env->NewStringUTF(hello.c_str());
     }
+    LOGE("success: avformat_find_stream_info ");
 
     OSS_CLEAR // 清空 (oss.clear() 是清除错误位 不能清空)
     OSS_FORMAT(" ", " ")
@@ -81,37 +82,14 @@ Java_lqk_video_MainActivity_stringFromJNI(
     // 5.获取流的标号
     int video_stream = -1;
     int audio_stream = -1;
-    // AVStream
-    // AVRational time_base; 代表duration的单位 含义是(num/den)秒
-    // int64_t duration;  以time_base为单位的一个数
-    // 总时长(秒)= duration * ((double)time_base.num / (double)time_base.den)// 注意精度损失
-    // 小心分母为0
-    // AVRational avg_frame_rate 帧率 例如 25 / 1
-    // AVCodecParameters *codecpar 音视频参数
     for (int i = 0; i < ps->nb_streams; ++i) {
         AVStream* stream = ps->streams[i];
-        OSS_FORMAT_ENUM("AVMediaType: ", stream->codecpar->codec_type)
-        OSS_FORMAT_ENUM("AVCodecID: ", stream->codecpar->codec_id)
+
         if (stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO){
             video_stream = i;
-            AVPixelFormat fmt;
-            OSS_FORMAT("AVPixelFormat: ", stream->codecpar->format)
-            OSS_FORMAT("width: ", stream->codecpar->width)
-            OSS_FORMAT("height: ", stream->codecpar->height)
-            OSS_FORMAT("fps: ", r2d(stream->avg_frame_rate))
         } else{
             audio_stream = i;
-            AVSampleFormat fmt;
-            OSS_FORMAT("AVSampleFormat: ", stream->codecpar->format)
-            OSS_FORMAT("channels: ", stream->codecpar->channels)
-            OSS_FORMAT("sample_rate: ", stream->codecpar->sample_rate)
         }
-        OSS_FORMAT_AVRATIONAL("time_base: ", stream->time_base)
-        OSS_FORMAT("duration: ", stream->duration)
-        OSS_FORMAT("总时长: ", stream->duration * r2d(stream->time_base))
-        OSS_FORMAT("bit_rate: ", stream->codecpar->bit_rate)
-
-        OSS_FORMAT(" ", " ")
     }
 
     hello += OSS_STR;
@@ -122,10 +100,12 @@ Java_lqk_video_MainActivity_stringFromJNI(
     // 查找解码器 软解码
     AVCodec*videoCodec = avcodec_find_decoder(ps->streams[video_stream]->codecpar->codec_id);
     // 硬解码
-//    codec = avcodec_find_decoder_by_name("h264_mediacodec");
+//    AVCodec* videoCodec = avcodec_find_decoder_by_name("h264_mediacodec");
     if (videoCodec == NULL){
-        goto end;
+        return env->NewStringUTF(hello.c_str());
     }
+    LOGE("success: avcodec_find_decoder_by_name(\"h264_mediacodec\") ");
+
     // 创建解码器上下文
     AVCodecContext* videoCodecContext = avcodec_alloc_context3(videoCodec);
     // 复制参数
@@ -135,107 +115,150 @@ Java_lqk_video_MainActivity_stringFromJNI(
     // 打开解码器
     re = avcodec_open2(videoCodecContext, videoCodec, 0);
     if (re != 0){
-        LOGE("avcodec_open2 video codec failed ");
-        goto end;
+        LOGE("avcodec_open2 video codec failed : %s", av_err2str(re));
+        return env->NewStringUTF(hello.c_str());
     }
+    LOGE("success: avcodec_open2 ");
 
     // 音频
     AVCodec*audioCodec = avcodec_find_decoder(ps->streams[audio_stream]->codecpar->codec_id);
     if (audioCodec == NULL){
-        goto end;
+        return env->NewStringUTF(hello.c_str());
     }
+    LOGE("success: avcodec_find_decoder audio ");
+
     AVCodecContext* audioCodecContext = avcodec_alloc_context3(audioCodec);
     avcodec_parameters_to_context(audioCodecContext, ps->streams[audio_stream]->codecpar);
     // 打开解码器
     re = avcodec_open2(audioCodecContext, audioCodec, 0);
     if (re != 0){
         LOGE("avcodec_open2 audio codec failed ");
-        goto end;
+        return env->NewStringUTF(hello.c_str());
     }
+    LOGE("success: avcodec_open2 audio ");
 
-    //AVPacket容易造成内存泄漏
-    // AVBufferRef:引用计数
-    // pts: 显示时间(单位AVRational)
-    // dts: 解码时间
-    //    av_packet_alloc();    库内部初始化
-    //    av_packet_clone();    拷贝
-    //    av_packet_ref();av_packet_unref(); 手动计数
-    //    av_packet_free();     库内部销毁
-    //    av_packet_from_data() 手动创建packet
-    //    av_seek_frame(AVFormatContext *s, int stream_index, int64_t timestamp,int flags)
+    // 初始化解码后数据的结构体
+    SwrContext* swrContext = swr_alloc_set_opts(NULL,
+                       av_get_channel_layout_nb_channels(2), AV_SAMPLE_FMT_S16, 44100,
+                       audioCodecContext->channel_layout, audioCodecContext->sample_fmt, audioCodecContext->sample_rate,
+                       0, NULL);
+    if (!swrContext || swr_init(swrContext)){
+        if (swrContext){
+            LOGE("failed: swr_init error");
+            swr_free(&swrContext);
+        }
+        LOGE("failed: swr_alloc_set_opts error");
+        return env->NewStringUTF(hello.c_str());
+    }
+    LOGE("success: swrContext init ");
+
+//    r 以只读方式打开文件，该文件必须存在。
+//    　　r+ 以可读写方式打开文件，该文件必须存在。
+//    　　rb+ 读写打开一个二进制文件，只允许读写数据。
+//    　　rt+ 读写打开一个文本文件，允许读和写。
+//    　　w 打开只写文件，若文件存在则文件长度清为0，即该文件内容会消失。若文件不存在则建立该文件。
+//    　　w+ 打开可读写文件，若文件存在则文件长度清为零，即该文件内容会消失。若文件不存在则建立该文件。
+//    　　a 以附加的方式打开只写文件。若文件不存在，则会建立该文件，如果文件存在，写入的数据会被加到文件尾，即文件原先的内容会被保留。（EOF符保留）
+//    　　a+ 以附加方式打开可读写的文件。若文件不存在，则会建立该文件，如果文件存在，写入的数据会被加到文件尾后，即文件原先的内容会被保留。 （原来的EOF符不保留）
+//    　　wb 只写打开或新建一个二进制文件；只允许写数据。
+//    　　wb+ 读写打开或建立一个二进制文件，允许读和写。
+//    　　wt+ 读写打开或着建立一个文本文件；允许读写。
+//    　　at+ 读写打开一个文本文件，允许读或在文本末追加数据。
+//    　　ab+ 读写打开一个二进制文件，允许读或在文件末追加数据。
+
+    FILE* file = fopen("/sdcard/test.pcm", "wb+");
     // 6.按帧读取
     AVPacket* pkt = av_packet_alloc();
-    while (1){
+    AVFrame* frame = av_frame_alloc();
+    while (true){
         int re = av_read_frame(ps, pkt);
         if (re != 0){
-            // av_seek_frame
-//            int pos = 5 * r2d(ps->streams[video_stream]->time_base);
-//            av_seek_frame(ps, video_stream, 0, AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_FRAME);
+            // end of file
             break;
         }
+        // 根据stream id获取解码器上下文
+        AVCodecContext*cc = pkt->stream_index == audio_stream ? audioCodecContext : videoCodecContext;
+        // 发送到线程中解码
+        re = avcodec_send_packet(cc, pkt);
 
-        // AVCodecContext解码器
-//        avcodec_register_all();
-//        avcodec_find_decoder();
-//        avcodec_find_decoder_by_name();
-//        // 手动指定解码器 arm硬解
-//        avcodec_find_decoder_by_name("h264_mediacodec");
-
-        // 解码环境 AVCodecContext内存注册方式
-        // AVCodecContext *avcodec_alloc_context3(const AVCodec *codec); 申请
-        // void avcodec_free_context(AVCodecContext **avctx);释放
-        // int avcodec_open2(AVCodecContext *avctx, const AVCodec *codec, AVDictionary **options); 打开解码器
-        // AVDictionary **options /libavcodec/options_table.h 设置多线程解码int thread_count
-        // opencv源码 解码会获取CPU数量 在根据数量开线程解码
-        // time_base 可设置和AVStream 的时间基数一致 编码 同步 单位统一：毫秒
-        // avcodec_parameters_to_context() AVStream 复制到 codec中  可修改time_base 或者 多线程
-
-        // 解码流程
-        pkt->stream_index
+        if (re != 0){
+            LOGE("avcodec_send_packet failed!");
+            continue;
+        }
 
 
-//        AVFrame;
-//        av_frame_alloc();
-//        av_frame_free();
-//        av_frame_ref();引用计数+1     av_frame_unref -1
-//        av_frame_clone();复制 计数+1
-//        linesize // 视频 一行大小    音频 一个通道大小  用来对齐 拷贝使用
-//        nb_samples单通道样本数量
-//        pts     搜到这一帧对应的pts   时间基数可能和pkt不一样
-//        pkt_dts
-//        format AVPixelFormat  AVSampleFormat
+        int data_size;
 
-//        解码/编码流程：
-//        1.发送
-//        对于解码 请调用avcodec_send_packet()以在AVPacket中给出解码器原始的压缩数据
-//        对于编码 请调用avcodec_send_frame()为编码器提供包含未压缩音频或视频的AVFrame
-//        2.循环接受
-//        在循环中接受输出，定期调用avcodec_receive_xxxxxx()函数并处理输出
-//        对于解码 请调用avcodec_receive_frame()。成功后，它将返回一个包含未压缩音频或者视频数据的AVFrame
-//        对于编码 请调用avcodec_receive_packet()。成功后，将返回带有压缩帧的AVPacket
-//        重复此呼叫，知道返回AVERROR(EAGAIN)或错误。AVERROR(EAGAIN)意味着需要重新输入数据才能返回新的输出
+        while (re >= 0)
+        {
+            re = avcodec_receive_frame(cc, frame);
+            if (re == AVERROR(EAGAIN) || re == AVERROR_EOF)
+            {
+//                LOGE("avcodec_receive_frame AVERROR(EAGAIN) ||  AVERROR_EOF");
+                break;
+            } else if (re < 0)
+            {
+                LOGE("failed: avcodec_receive_frame error");
+                return env->NewStringUTF(hello.c_str());
+            }
+            // 视频帧
+            if (pkt->stream_index == video_stream)
+            {
+                frame->data;
+                frame->nb_samples;
+                frame->pts;
+                frame->pkt_dts;
+            } else if (pkt->stream_index == audio_stream)
+            {
+                data_size = av_get_bytes_per_sample(cc->sample_fmt);
+                if (data_size < 0){
+                    LOGE("failed: av_get_bytes_per_sample < 0");
+                    return env->NewStringUTF(hello.c_str());
+                }
+                // 获取对应参数的采样需要占用的内存大小 每一个单独的声道需要的大小
+                int out_buffer_size = av_samples_get_buffer_size(NULL,
+                                                                 av_get_channel_layout_nb_channels(2),
+                                                                 frame->nb_samples,
+                                                                 AV_SAMPLE_FMT_S16, 1);
+                // 存储pcm数据
+                uint8_t *out_buffer = (uint8_t*)av_malloc((size_t) out_buffer_size);
+                // 重采样
+                re = swr_convert(swrContext, &out_buffer, out_buffer_size,
+                            (const uint8_t **) frame->data, frame->nb_samples);
 
-//        在解码或编码开始时，编码器可能会接受多个输入帧/数据包而不返回帧，知道其内部缓冲区被填满为止
-//        3.结束流
-//        需要"刷新(排水)"编解码器，因为编解码器内部可能会缓冲多个帧数据包以实现性能或不必要性(考虑B帧)
-//        处理方式：
-//        发送NULL到avcodec_send_packet或avcodec_send_frame,知道返回AVERROR_EOF
-//        除非忘记进入排水模式，否则这些功能将不会返回AVERROR
+                if (re < 0){
+                    LOGI("fail resample audio");
+                    break;
+                }
+                // 获取对应参数的采样需要占用的内存大小
+//                int out_buffer_size = av_samples_get_buffer_size(NULL,
+//                                                                 av_get_channel_layout_nb_channels(2),
+//                                                                 frame->nb_samples,
+//                                                                 AV_SAMPLE_FMT_S16, 1);
+                // 写入文件
+                fwrite(out_buffer, 1, (size_t) out_buffer_size, file);
 
-//        在再次解码之前，必须使用avcodec_flush_buffer()重新编码
+                LOGI("frame->nb_samples：%d out_buffer_size: %d  pts: %f",
+                     frame->nb_samples,
+                     out_buffer_size,
+                     frame->pts * r2d(ps->streams[audio_stream]->time_base));
 
-
-
-
+                av_free(out_buffer);
+                out_buffer = NULL;
+            }
+        }
         // 清理pkt
-        LOGI("av_read_frame: pts: %lld  dts: %lld streamindex: %d duration: %lld", pkt->pts, pkt->dts, pkt->stream_index, pkt->duration);
+//        LOGI("av_read_frame: pts: %lld  dts: %lld streamindex: %d duration: %lld", pkt->pts, pkt->dts, pkt->stream_index, pkt->duration);
         av_packet_unref(pkt);
+//        av_frame_unref(frame);
     }
-
-    // 释放packet防止内存泄露
     av_packet_free(&pkt);
+    av_frame_free(&frame);
+    pkt = NULL;
+    frame = NULL;
+    // 关闭写入文件
+    fclose(file);
 
-end:
     // 关闭AVFormatContext
     avformat_close_input(&ps);
     if (ps == NULL){
@@ -243,6 +266,8 @@ end:
     } else{
         hello += "close filed";
     }
+
+    LOGE("end");
 
     return env->NewStringUTF(hello.c_str());
 }
