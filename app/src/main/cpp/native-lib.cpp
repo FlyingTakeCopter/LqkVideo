@@ -111,7 +111,7 @@ Java_lqk_video_MainActivity_stringFromJNI(
     // 复制参数
     avcodec_parameters_to_context(videoCodecContext, ps->streams[video_stream]->codecpar);
     // 修改线程数量
-    videoCodecContext->thread_count = 1;
+    videoCodecContext->thread_count = 8;
     // 打开解码器
     re = avcodec_open2(videoCodecContext, videoCodec, 0);
     if (re != 0){
@@ -172,15 +172,30 @@ Java_lqk_video_MainActivity_stringFromJNI(
 //    　　at+ 读写打开一个文本文件，允许读或在文本末追加数据。
 //    　　ab+ 读写打开一个二进制文件，允许读或在文件末追加数据。
 
+    SwsContext* swsContext = NULL;
+
+    int outWidth = 320;
+    int outHeight = 180;
+    char *rgb = new char[1920*1080*3];
+
     // 创建临时buf
     char *pcm = new char[44100 * 2 * 2];// 1s采样数量 * 占用2字节 * 双通道
 
+    swsContext = sws_getCachedContext(swsContext,
+                                      videoCodecContext->width, videoCodecContext->height, videoCodecContext->pix_fmt,
+                                      outWidth, outHeight, AV_PIX_FMT_RGBA,
+                                      SWS_BILINEAR,
+                                      0, 0, 0);
 
+    //打开输出视频的文件
+    FILE* fileV = fopen("/sdcard/testV.rgb", "wb+");
     FILE* file = fopen("/sdcard/test.pcm", "wb+");
     // 6.按帧读取
     AVPacket* pkt = av_packet_alloc();
     AVFrame* frame = av_frame_alloc();
-    while (true){
+
+    int read_frame_count = 0;
+    while (read_frame_count <= 200){
         int re = av_read_frame(ps, pkt);
         if (re != 0){
             // end of file
@@ -211,12 +226,27 @@ Java_lqk_video_MainActivity_stringFromJNI(
             // 视频帧
             if (pkt->stream_index == video_stream)
             {
-                frame->data;
-                frame->nb_samples;
-                frame->pts;
-                frame->pkt_dts;
+                // 开始像素格式转换
+                uint8_t  *data[AV_NUM_DATA_POINTERS] = {0};
+                data[0] = (uint8_t *)rgb;
+                int lines[AV_NUM_DATA_POINTERS] = {0};
+                lines[0] = outWidth * 4;
+                int h = sws_scale(swsContext,
+                                  (const uint8_t* const*)frame->data,
+                                  frame->linesize,
+                                  0,
+                                  videoCodecContext->height,
+                                  data, lines);
+                LOGE("video pts: %f h: %d", frame->pts * r2d(ps->streams[audio_stream]->time_base), h);
+
+                // rgb播放指令
+                // ./ffplay -f rawvideo -pixel_format rgba -video_size 320*180 ./testV.rgb
+                fwrite(rgb, 1, (size_t) (outWidth * outHeight * 4), fileV);
+
+                read_frame_count++;
             } else if (pkt->stream_index == audio_stream)
             {
+                continue;
                 uint8_t  *out[2] = {0};
                 out[0] = (uint8_t*)pcm;
 
@@ -255,13 +285,18 @@ Java_lqk_video_MainActivity_stringFromJNI(
 //        av_frame_unref(frame);
     }
     delete pcm;
+    delete rgb;
+
+    swr_free(&swrContext);
+    sws_freeContext(swsContext);
+
     av_packet_free(&pkt);
     av_frame_free(&frame);
     pkt = NULL;
     frame = NULL;
     // 关闭写入文件
     fclose(file);
-
+    fclose(fileV);
     // 关闭AVFormatContext
     avformat_close_input(&ps);
     if (ps == NULL){
