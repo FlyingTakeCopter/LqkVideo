@@ -138,10 +138,16 @@ Java_lqk_video_MainActivity_stringFromJNI(
     LOGE("success: avcodec_open2 audio ");
 
     // 初始化解码后数据的结构体
-    SwrContext* swrContext = swr_alloc_set_opts(NULL,
-                       av_get_channel_layout_nb_channels(2), AV_SAMPLE_FMT_S16, 44100,
-                       audioCodecContext->channel_layout, audioCodecContext->sample_fmt, audioCodecContext->sample_rate,
-                       0, NULL);
+    SwrContext* swrContext = swr_alloc();
+
+    swr_alloc_set_opts(swrContext,
+                       av_get_channel_layout_nb_channels(2), // out_ch_layout
+                       AV_SAMPLE_FMT_S16, // AVSampleFormat out_sample_fmt
+                       audioCodecContext->sample_rate,//int out_sample_rate
+                       av_get_channel_layout_nb_channels(audioCodecContext->channel_layout), // in_ch_layout
+                       audioCodecContext->sample_fmt, // enum AVSampleFormat in_sample_fmt
+                       audioCodecContext->sample_rate,// in_sample_rate
+                       0, 0);
     if (!swrContext || swr_init(swrContext)){
         if (swrContext){
             LOGE("failed: swr_init error");
@@ -166,6 +172,10 @@ Java_lqk_video_MainActivity_stringFromJNI(
 //    　　at+ 读写打开一个文本文件，允许读或在文本末追加数据。
 //    　　ab+ 读写打开一个二进制文件，允许读或在文件末追加数据。
 
+    // 创建临时buf
+    char *pcm = new char[44100 * 2 * 2];// 1s采样数量 * 占用2字节 * 双通道
+
+
     FILE* file = fopen("/sdcard/test.pcm", "wb+");
     // 6.按帧读取
     AVPacket* pkt = av_packet_alloc();
@@ -185,9 +195,6 @@ Java_lqk_video_MainActivity_stringFromJNI(
             LOGE("avcodec_send_packet failed!");
             continue;
         }
-
-
-        int data_size;
 
         while (re >= 0)
         {
@@ -210,41 +217,36 @@ Java_lqk_video_MainActivity_stringFromJNI(
                 frame->pkt_dts;
             } else if (pkt->stream_index == audio_stream)
             {
-                data_size = av_get_bytes_per_sample(cc->sample_fmt);
-                if (data_size < 0){
-                    LOGE("failed: av_get_bytes_per_sample < 0");
-                    return env->NewStringUTF(hello.c_str());
-                }
-                // 获取对应参数的采样需要占用的内存大小 每一个单独的声道需要的大小
-                int out_buffer_size = av_samples_get_buffer_size(NULL,
-                                                                 av_get_channel_layout_nb_channels(2),
-                                                                 frame->nb_samples,
-                                                                 AV_SAMPLE_FMT_S16, 1);
-                // 存储pcm数据
-                uint8_t *out_buffer = (uint8_t*)av_malloc((size_t) out_buffer_size);
-                // 重采样
-                re = swr_convert(swrContext, &out_buffer, out_buffer_size,
-                            (const uint8_t **) frame->data, frame->nb_samples);
+                uint8_t  *out[2] = {0};
+                out[0] = (uint8_t*)pcm;
 
-                if (re < 0){
-                    LOGI("fail resample audio");
-                    break;
-                }
-                // 获取对应参数的采样需要占用的内存大小
+//                // 获取对应参数的采样需要占用的内存大小 每一个单独的声道需要的大小
 //                int out_buffer_size = av_samples_get_buffer_size(NULL,
 //                                                                 av_get_channel_layout_nb_channels(2),
 //                                                                 frame->nb_samples,
 //                                                                 AV_SAMPLE_FMT_S16, 1);
-                // 写入文件
-                fwrite(out_buffer, 1, (size_t) out_buffer_size, file);
+//                // 存储pcm数据
+//                uint8_t *out_buffer = (uint8_t*)av_malloc((size_t) out_buffer_size);
+                // 重采样
+                int len = swr_convert(swrContext, out, frame->nb_samples,
+                            (const uint8_t **) frame->data, frame->nb_samples);
 
-                LOGI("frame->nb_samples：%d out_buffer_size: %d  pts: %f",
+                // 获取对应参数的采样需要占用的内存大小
+                int out_buffer_size = av_samples_get_buffer_size(NULL,
+                                                                 av_get_channel_layout_nb_channels(2),
+                                                                 frame->nb_samples,
+                                                                 AV_SAMPLE_FMT_S16, 1);
+                // 写入文件
+                fwrite(pcm, 1, (size_t) out_buffer_size, file);
+
+                LOGI("len: %d  frame->nb_samples：%d out_buffer_size: %d pts: %f",
+                     len,
                      frame->nb_samples,
                      out_buffer_size,
                      frame->pts * r2d(ps->streams[audio_stream]->time_base));
 
-                av_free(out_buffer);
-                out_buffer = NULL;
+//                av_free(out_buffer);
+//                out_buffer = NULL;
             }
         }
         // 清理pkt
@@ -252,6 +254,7 @@ Java_lqk_video_MainActivity_stringFromJNI(
         av_packet_unref(pkt);
 //        av_frame_unref(frame);
     }
+    delete pcm;
     av_packet_free(&pkt);
     av_frame_free(&frame);
     pkt = NULL;
