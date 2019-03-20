@@ -294,6 +294,7 @@ Java_lqk_video_MainActivity_stringFromJNI(
                                       frame->height,
                                       data, lines);
 
+                    // AV_PIX_FMT_RGBA,      ///< packed RGBA 8:8:8:8, 32bpp, RGBARGBA...
                     // rgb播放指令
                     // ./ffplay -f rawvideo -pixel_format rgba -video_size 320*180 ./testV.rgb
                     fwrite(rgb, 1, (size_t) (outWidth * outHeight * 4), fileRGB);
@@ -314,6 +315,12 @@ Java_lqk_video_MainActivity_stringFromJNI(
                                       frame->height,
                                       data, lines);
 
+//                  AV_PIX_FMT_YUV420P,   planar格式///< planar YUV 4:2:0, 12bpp, (1 Cr & Cb sample per 2x2 Y samples)
+                    // 写入一帧的数据
+                    // YYYYYYYY
+                    // YYYYYYYY
+                    // UUUU
+                    // VVVV
                     // yuv播放指令
                     // ./ffplay -f rawvideo -pixel_format yuv420p -video_size 320*180 ./testYUV.yuv
                     int size_temp;
@@ -321,6 +328,13 @@ Java_lqk_video_MainActivity_stringFromJNI(
                     fwrite(data[0], 1,size_temp, fileYUV);
                     fwrite(data[1], 1,size_temp/4, fileYUV);
                     fwrite(data[2], 1,size_temp/4, fileYUV);
+                    // 或者 按宽度写入 每行按照高度循环
+                    for(int j=0; j<outHeight; j++)
+                        fwrite(data[0] + j * outWidth, 1, outWidth, fileYUV);
+                    for(int j=0; j<outHeight/2; j++)
+                        fwrite(data[1] + j * outWidth, 1, outWidth/2, fileYUV);
+                    for(int j=0; j<outHeight/2; j++)
+                        fwrite(data[2] + j * outWidth, 1, outWidth/2, fileYUV);
                 }
 
                 if (save_to_rgba || save_to_yuv420p){
