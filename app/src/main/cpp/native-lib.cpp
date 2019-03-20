@@ -8,6 +8,7 @@ extern "C"{
 #include <libavutil/error.h>
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
+#include <libavutil/imgutils.h>
 }
 
 #ifdef ANDROID
@@ -172,14 +173,17 @@ Java_lqk_video_MainActivity_stringFromJNI(
 //    　　at+ 读写打开一个文本文件，允许读或在文本末追加数据。
 //    　　ab+ 读写打开一个二进制文件，允许读或在文件末追加数据。
 
-    // 老版本sws转换
+    // 老版本sws转换 及 新版本新接口方式
 //    AVFrame* pFrameYUV;
-//    int sizeYUV = avpicture_get_size(AV_PIX_FMT_YUV420P, outWidth, outHeight);
+//    int sizeYUV = av_image_get_buffer_size(AV_PIX_FMT_YUV420P, outWidth, outHeight, 1);// avpicture_get_size对应的新版本函数 libavutils/imgutils.h
+////    int sizeYUV = avpicture_get_size(AV_PIX_FMT_YUV420P, outWidth, outHeight);
 //    LOGE("sizeYUV %d", sizeYUV);
 //    pFrameYUV = av_frame_alloc();
 //
-//    uint8_t *out_yuv_buffer = (uint8_t *)av_malloc(sizeYUV);
-//    avpicture_fill((AVPicture *)pFrameYUV, out_yuv_buffer, AV_PIX_FMT_YUV420P, outWidth, outHeight);
+//    av_image_fill_arrays(pFrameYUV->data, pFrameYUV->linesize,sizeYUV,
+//                         AV_PIX_FMT_YUV420P,outWidth, outHeight,1);// avpicture_fill对应的新版本函数
+////    uint8_t *out_yuv_buffer = (uint8_t *)av_malloc(sizeYUV);
+////    avpicture_fill((AVPicture *)pFrameYUV, out_yuv_buffer, AV_PIX_FMT_YUV420P, outWidth, outHeight);
     // sws转换 提取裸数据
     bool save_to_rgba = true;
     bool save_to_yuv420p = true;
