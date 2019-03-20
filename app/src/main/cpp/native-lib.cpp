@@ -65,7 +65,7 @@ Java_lqk_video_MainActivity_stringFromJNI(
 //    av_find_input_format()
 //    AVInputFormat
 //    char p[] = "http://ksy.fffffive.com/mda-hinp1ik37b0rt1mj/mda-hinp1ik37b0rt1mj.mp4";
-    char p[] = "sdcard/1080.mp4";
+    char p[] = "sdcard/v1080.mp4";
     int re = avformat_open_input(&ps, p, 0, 0);
     if (re == 0){
         LOGE("avformat_open_input success : %s", p);
@@ -241,15 +241,24 @@ Java_lqk_video_MainActivity_stringFromJNI(
             while (avcodec_receive_frame(curCodecCtx, frame) == 0)
             {
                 if (pkt->stream_index == audio_stream){
-                    LOGE("audio pts: %f nb_samples: %d linesize: %d",
+                    AVPixelFormat;
+                    LOGE("audio pts: %f fmt: %d nb_samples: %d l1: %d l2: %d l3:%d",
                          frame->pts * r2d(ps->streams[audio_stream]->time_base),
+                         frame->format,
                         frame->nb_samples,
-                        frame->linesize[0]);
+                        frame->linesize[0],
+                        frame->linesize[1],
+                        frame->linesize[2]);
 
                 } else if (pkt->stream_index == video_stream){
-                    LOGE("video pts: %f l1: %d l2: %d, l3: %d",
+                    AVSampleFormat ;
+                    LOGE("video pts: %f fmt: %d l1: %d l2: %d, l3: %d l4: %d",
                          frame->pts * r2d(ps->streams[video_stream]->time_base),
-                         frame->linesize[0], frame->linesize[1], frame->linesize[2]);
+                         frame->format,
+                         frame->linesize[0],
+                         frame->linesize[1],
+                         frame->linesize[2],
+                         frame->linesize[3]);
 
                 }
 
