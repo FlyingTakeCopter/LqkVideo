@@ -104,7 +104,7 @@ Java_lqk_video_MainActivity_stringFromJNI(
     if (videoCodec == NULL){
         return env->NewStringUTF(hello.c_str());
     }
-    LOGE("success: avcodec_find_decoder_by_name(\"h264_mediacodec\") ");
+//    LOGE("success: avcodec_find_decoder_by_name(\"h264_mediacodec\") ");
 
     // 创建解码器上下文
     AVCodecContext* videoCodecContext = avcodec_alloc_context3(videoCodec);
@@ -172,32 +172,81 @@ Java_lqk_video_MainActivity_stringFromJNI(
 //    　　at+ 读写打开一个文本文件，允许读或在文本末追加数据。
 //    　　ab+ 读写打开一个二进制文件，允许读或在文件末追加数据。
 
-    SwsContext* swsContext = NULL;
-
+    // 老版本sws转换
+//    AVFrame* pFrameYUV;
+//    int sizeYUV = avpicture_get_size(AV_PIX_FMT_YUV420P, outWidth, outHeight);
+//    LOGE("sizeYUV %d", sizeYUV);
+//    pFrameYUV = av_frame_alloc();
+//
+//    uint8_t *out_yuv_buffer = (uint8_t *)av_malloc(sizeYUV);
+//    avpicture_fill((AVPicture *)pFrameYUV, out_yuv_buffer, AV_PIX_FMT_YUV420P, outWidth, outHeight);
+    // sws转换 提取裸数据
+    bool save_to_rgba = true;
+    bool save_to_yuv420p = true;
+    SwsContext* swsContextYUV = NULL;
+    SwsContext* swsContextRGB = NULL;
     int outWidth = 320;
     int outHeight = 180;
-    char *rgb = new char[1920*1080*3];
+    char *rgb = NULL;
+    char *y = NULL;
+    char *u = NULL;
+    char *v = NULL;
+    //打开输出视频的文件
+    FILE* fileRGB = NULL;
+    FILE* fileYUV = NULL;
+
+    if (save_to_rgba){
+        // 单行交错存储
+        // RGBARGBARBGA
+        rgb = new char[1920 * 1080 * 3];
+        swsContextRGB = sws_getCachedContext(swsContextRGB,
+                                          videoCodecContext->width,
+                                          videoCodecContext->height,
+                                          videoCodecContext->pix_fmt,
+                                          outWidth, outHeight, AV_PIX_FMT_RGBA,
+                                          SWS_BILINEAR,
+                                          0, 0, 0);
+        fileRGB = fopen("/sdcard/testRGB.rgb", "wb+");
+        LOGE("success: swsContextRGB  sws_getCachedContext");
+    }
+
+    if (save_to_yuv420p)
+    {
+        // 平面存储
+        // yyyyyyyyyy
+        // uuuuu
+        // vvvvv
+        y = new char[outWidth * outHeight];
+        u = new char[outWidth * outHeight / 4];
+        v = new char[outWidth * outHeight / 4];
+        swsContextYUV = sws_getCachedContext(swsContextYUV,
+                                          videoCodecContext->width,
+                                          videoCodecContext->height,
+                                          videoCodecContext->pix_fmt,
+                                          outWidth, outHeight, AV_PIX_FMT_YUV420P,
+                                          SWS_BILINEAR,
+                                          0, 0, 0);
+        fileYUV = fopen("/sdcard/testYUV.yuv", "wb+");
+        LOGE("success: swsContextYUV  sws_getCachedContext ");
+
+    }
 
     // 创建临时buf
     char *pcm = new char[44100 * 2 * 2];// 1s采样数量 * 占用2字节 * 双通道
 
-    swsContext = sws_getCachedContext(swsContext,
-                                      videoCodecContext->width, videoCodecContext->height, videoCodecContext->pix_fmt,
-                                      outWidth, outHeight, AV_PIX_FMT_RGBA,
-                                      SWS_BILINEAR,
-                                      0, 0, 0);
+    FILE* filePCM = fopen("/sdcard/test.pcm", "wb+");
+    LOGE("success: fopen /sdcard/test.pcm");
 
-    //打开输出视频的文件
-    FILE* fileV = fopen("/sdcard/testV.rgb", "wb+");
-    FILE* file = fopen("/sdcard/test.pcm", "wb+");
     // 6.按帧读取
     AVPacket* pkt = av_packet_alloc();
     AVFrame* frame = av_frame_alloc();
 
     int read_frame_count = 0;
-    while (read_frame_count <= 200){
+    while (true){
+//        LOGE("start: av_read_frame ");
         int re = av_read_frame(ps, pkt);
         if (re != 0){
+            LOGE("av_read_frame error or eof!");
             // end of file
             break;
         }
@@ -207,45 +256,82 @@ Java_lqk_video_MainActivity_stringFromJNI(
         re = avcodec_send_packet(cc, pkt);
 
         if (re != 0){
-            LOGE("avcodec_send_packet failed!");
+            LOGE("avcodec_send_packet != 0!");
             continue;
         }
 
-        while (re >= 0)
+        while (true)
         {
             re = avcodec_receive_frame(cc, frame);
-            if (re == AVERROR(EAGAIN) || re == AVERROR_EOF)
-            {
-//                LOGE("avcodec_receive_frame AVERROR(EAGAIN) ||  AVERROR_EOF");
+            if (re != 0){
+                if (re == AVERROR(EAGAIN) || re == AVERROR_EOF)
+                {
+//                    LOGE("avcodec_receive_frame AVERROR(EAGAIN) ||  AVERROR_EOF");
+                    break;
+                } else if (re < 0)
+                {
+                    LOGE("failed: avcodec_receive_frame error");
+                    return env->NewStringUTF(hello.c_str());
+                }
                 break;
-            } else if (re < 0)
-            {
-                LOGE("failed: avcodec_receive_frame error");
-                return env->NewStringUTF(hello.c_str());
             }
+
             // 视频帧
             if (pkt->stream_index == video_stream)
             {
                 // 开始像素格式转换
                 uint8_t  *data[AV_NUM_DATA_POINTERS] = {0};
-                data[0] = (uint8_t *)rgb;
                 int lines[AV_NUM_DATA_POINTERS] = {0};
-                lines[0] = outWidth * 4;
-                int h = sws_scale(swsContext,
-                                  (const uint8_t* const*)frame->data,
-                                  frame->linesize,
-                                  0,
-                                  videoCodecContext->height,
-                                  data, lines);
-                LOGE("video pts: %f h: %d", frame->pts * r2d(ps->streams[audio_stream]->time_base), h);
 
-                // rgb播放指令
-                // ./ffplay -f rawvideo -pixel_format rgba -video_size 320*180 ./testV.rgb
-                fwrite(rgb, 1, (size_t) (outWidth * outHeight * 4), fileV);
+                if (save_to_rgba){
+                    data[0] = (uint8_t *)rgb;
+                    lines[0] = outWidth * 4;
+
+                    int h = sws_scale(swsContextRGB,
+                                      (const uint8_t* const*)frame->data,
+                                      frame->linesize,
+                                      0,
+                                      frame->height,
+                                      data, lines);
+
+                    // rgb播放指令
+                    // ./ffplay -f rawvideo -pixel_format rgba -video_size 320*180 ./testV.rgb
+                    fwrite(rgb, 1, (size_t) (outWidth * outHeight * 4), fileRGB);
+                }
+                if (save_to_yuv420p)
+                {
+                    data[0] = (uint8_t *)y;
+                    data[1] = (uint8_t *)u;
+                    data[2] = (uint8_t *)v;
+                    lines[0] = outWidth;
+                    lines[1] = outWidth / 2;
+                    lines[2] = outWidth / 2;
+
+                    int h = sws_scale(swsContextYUV,
+                                      (const uint8_t* const*)frame->data,
+                                      frame->linesize,
+                                      0,
+                                      frame->height,
+                                      data, lines);
+
+                    // yuv播放指令
+                    // ./ffplay -f rawvideo -pixel_format yuv420p -video_size 320*180 ./testYUV.yuv
+                    int size_temp;
+                    size_temp = outWidth * outHeight;
+                    fwrite(data[0], 1,size_temp, fileYUV);
+                    fwrite(data[1], 1,size_temp/4, fileYUV);
+                    fwrite(data[2], 1,size_temp/4, fileYUV);
+                }
+
+                if (save_to_rgba || save_to_yuv420p){
+                    LOGE("video pts: %f", frame->pts * r2d(ps->streams[video_stream]->time_base));
+                }
 
                 read_frame_count++;
             } else if (pkt->stream_index == audio_stream)
             {
+//                LOGE("audio pts: %f",
+//                     frame->pts * r2d(ps->streams[audio_stream]->time_base));
                 continue;
                 uint8_t  *out[2] = {0};
                 out[0] = (uint8_t*)pcm;
@@ -258,8 +344,11 @@ Java_lqk_video_MainActivity_stringFromJNI(
 //                // 存储pcm数据
 //                uint8_t *out_buffer = (uint8_t*)av_malloc((size_t) out_buffer_size);
                 // 重采样
-                int len = swr_convert(swrContext, out, frame->nb_samples,
-                            (const uint8_t **) frame->data, frame->nb_samples);
+                int len = swr_convert(swrContext,
+                                      out,
+                                      frame->nb_samples,
+                            (const uint8_t **) frame->data,
+                                      frame->nb_samples);
 
                 // 获取对应参数的采样需要占用的内存大小
                 int out_buffer_size = av_samples_get_buffer_size(NULL,
@@ -267,7 +356,7 @@ Java_lqk_video_MainActivity_stringFromJNI(
                                                                  frame->nb_samples,
                                                                  AV_SAMPLE_FMT_S16, 1);
                 // 写入文件
-                fwrite(pcm, 1, (size_t) out_buffer_size, file);
+                fwrite(pcm, 1, (size_t) out_buffer_size, filePCM);
 
                 LOGI("len: %d  frame->nb_samples：%d out_buffer_size: %d pts: %f",
                      len,
@@ -282,21 +371,32 @@ Java_lqk_video_MainActivity_stringFromJNI(
         // 清理pkt
 //        LOGI("av_read_frame: pts: %lld  dts: %lld streamindex: %d duration: %lld", pkt->pts, pkt->dts, pkt->stream_index, pkt->duration);
         av_packet_unref(pkt);
-//        av_frame_unref(frame);
+        av_frame_unref(frame);
     }
+    LOGE("end: av_read_frame ");
+
     delete pcm;
-    delete rgb;
+    if (save_to_rgba){
+        delete rgb;
+        sws_freeContext(swsContextRGB);
+        fclose(fileRGB);
+    }
+    if (save_to_yuv420p){
+        delete y;
+        delete u;
+        delete v;
+        sws_freeContext(swsContextYUV);
+        fclose(fileYUV);
+    }
 
     swr_free(&swrContext);
-    sws_freeContext(swsContext);
 
     av_packet_free(&pkt);
     av_frame_free(&frame);
     pkt = NULL;
     frame = NULL;
     // 关闭写入文件
-    fclose(file);
-    fclose(fileV);
+    fclose(filePCM);
     // 关闭AVFormatContext
     avformat_close_input(&ps);
     if (ps == NULL){
