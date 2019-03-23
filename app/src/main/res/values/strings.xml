@@ -1,3 +1,8 @@
 <resources>
-    <string name="app_name">LqkVideo</string>
+    <string name="app_name">LqkAudioPlayer</string>
+    <string name="audio_player_audiotrack">AudioTrack</string>
+    <string name="opensl_es_audiotrack">OpenSL ES</string>
+    <string name="play">Play</string>
+    <string name="stop">Stop</string>
+    <string name="action_settings">Settings</string>
 </resources>
