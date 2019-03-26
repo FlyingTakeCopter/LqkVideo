@@ -10,6 +10,8 @@ import android.view.View;
 import android.os.Handler;
 import android.os.Message;
 
+import lqk.video.audiotrack.NativeAudioTrackPlayerController;
+
 public class MainActivity extends AppCompatActivity {
     private static String TAG = "MainActivity";
 
@@ -48,17 +50,17 @@ public class MainActivity extends AppCompatActivity {
     private void bindListener() {
         audioTrackPlayBtn.setOnClickListener(audioTrackPlayBtnListener);
         audioTrackStopBtn.setOnClickListener(audioTrackStopBtnListener);
-        openSLESPlayBtn.setOnClickListener(openSLESPlayBtnListener);
-        openSLESStopBtn.setOnClickListener(openSLESStopBtnListener);
+//        openSLESPlayBtn.setOnClickListener(openSLESPlayBtnListener);
+//        openSLESStopBtn.setOnClickListener(openSLESStopBtnListener);
     }
 
-    private NativeMp3PlayerController audioTrackPlayerController;
+    private NativeAudioTrackPlayerController audioTrackPlayerController;
     OnClickListener audioTrackPlayBtnListener = new OnClickListener() {
 
         @Override
         public void onClick(View v) {
             Log.i(TAG, "Click AudioTrack Play Btn");
-            audioTrackPlayerController = new NativeMp3PlayerController();
+            audioTrackPlayerController = new NativeAudioTrackPlayerController();
             audioTrackPlayerController.setHandler(handler);
             audioTrackPlayerController.setAudioDataSource(playFilePath);
             audioTrackPlayerController.start();
@@ -78,31 +80,31 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
-    private SoundTrackController openSLPlayerController;
-    OnClickListener openSLESPlayBtnListener = new OnClickListener() {
-
-        @Override
-        public void onClick(View v) {
-            Log.i(TAG, "Click OpenSL ES Play Btn");
-            // OpenSL EL初始化播放器
-            openSLPlayerController = new SoundTrackController();
-            openSLPlayerController.setAudioDataSource(playFilePath, 0.2f);
-            // OpenSL EL进行播放
-            openSLPlayerController.play();
-        }
-    };
-
-    OnClickListener openSLESStopBtnListener = new OnClickListener() {
-
-        @Override
-        public void onClick(View v) {
-            Log.i(TAG, "Click OpenSL ES Stop Btn");
-            if (null != openSLPlayerController) {
-                openSLPlayerController.stop();
-                openSLPlayerController = null;
-            }
-        }
-    };
+//    private SoundTrackController openSLPlayerController;
+//    OnClickListener openSLESPlayBtnListener = new OnClickListener() {
+//
+//        @Override
+//        public void onClick(View v) {
+//            Log.i(TAG, "Click OpenSL ES Play Btn");
+//            // OpenSL EL初始化播放器
+//            openSLPlayerController = new SoundTrackController();
+//            openSLPlayerController.setAudioDataSource(playFilePath, 0.2f);
+//            // OpenSL EL进行播放
+//            openSLPlayerController.play();
+//        }
+//    };
+//
+//    OnClickListener openSLESStopBtnListener = new OnClickListener() {
+//
+//        @Override
+//        public void onClick(View v) {
+//            Log.i(TAG, "Click OpenSL ES Stop Btn");
+//            if (null != openSLPlayerController) {
+//                openSLPlayerController.stop();
+//                openSLPlayerController = null;
+//            }
+//        }
+//    };
 
     private Handler handler = new Handler() {
         @Override
