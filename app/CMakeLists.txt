@@ -5,7 +5,9 @@ set(CPATH ${CMAKE_CURRENT_SOURCE_DIR}/src/main/cpp)
 
 add_library( native-lib
              SHARED
-             ${CPATH}/native-lib.cpp )
+             ${CPATH}/AudioTrackDecoder.cpp
+             ${CPATH}/native-lib.cpp
+             ${CPATH}/CommonTools.cpp)
 
 # 添加头文件路径（相对于本文件路径）同路径下 include文件夹
 include_directories(include)
