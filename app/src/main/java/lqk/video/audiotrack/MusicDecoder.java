@@ -23,9 +23,8 @@ public class MusicDecoder {
     }
 
     // 读取参数
-    public int getMusicMetaByPath(){
-
-        return -1;
+    public int getMusicMetaByPath(String musicPath, int[] metaArray){
+        return getMusicMeta(musicPath, metaArray);
     }
 
     /** 第一步进行获取伴奏文件的meta信息，一个是采样率一个是比特率 **/

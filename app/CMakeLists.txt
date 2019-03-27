@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.4.1)
 
 # 设置cpp文件路径
 set(CPATH ${CMAKE_CURRENT_SOURCE_DIR}/src/main/cpp)
+set(COMMONPATH ${CMAKE_CURRENT_SOURCE_DIR}/src/main/cpp/common)
 
 add_library( native-lib
              SHARED
