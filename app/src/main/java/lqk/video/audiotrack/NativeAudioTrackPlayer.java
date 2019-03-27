@@ -74,6 +74,11 @@ public class NativeAudioTrackPlayer {
         return true;
     }
 
+    // 开始播放线程
+    public void prepare(){
+
+    }
+
     public void start(){
 
     }

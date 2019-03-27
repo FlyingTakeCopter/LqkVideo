@@ -16,21 +16,34 @@ public class NativeAudioTrackPlayerController {
 //    private TimerTask mTimerTask = null;
     private Handler mHandler;
 
+    NativeAudioTrackPlayerController(){
+        if (player == null){
+            player = new NativeAudioTrackPlayer();
+        }
+    }
+
     public void setHandler(Handler handler){
         this.mHandler = handler;
     }
 
     public boolean setAudioDataSource(String path){
-        player = new NativeAudioTrackPlayer();
-        return player.setAudioDataSource(path);
+        boolean res = player.setAudioDataSource(path);
+        if (res){
+            player.prepare();
+        }
+        return res;
     }
 
     public void start(){
-        player.start();
+        if (player != null){
+            player.start();
+        }
     }
 
     public void stop(){
-        player.stop();
+        if (player != null){
+            player.stop();
+        }
     }
 
 //    private void timerStop() {
